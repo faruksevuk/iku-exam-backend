@@ -1,37 +1,44 @@
 """
-OMR Engine — Optical Mark Recognition for MC and MS questions.
+OMR — Optical Mark Recognition for MC (multiple choice) and MS (multi-select).
 
-Key insight: empty MC circles/MS squares have ~30-35% dark pixels from their border.
-A filled bubble has 55%+. Blank (no mark at all) would be below 10%.
+Key idea:
+  - An empty MC circle / MS square border alone contributes ~30-35% dark pixels.
+  - A student-filled mark pushes the ratio to 50%+.
+  - A fully blank region stays below 10%.
+
+Thresholds live in config.py.
 """
+
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
-from typing import Dict, List, Optional
 
-# Thresholds calibrated for 12x12 bubble images where empty circle border ≈ 30-35%
-BLANK_THRESHOLD = 0.10     # below = definitely no mark
-EMPTY_BORDER = 0.40        # empty circle/square border artifact
-FILLED_THRESHOLD = 0.50    # above = student filled this bubble
+import config
 
 
 def get_fill_ratio(image: np.ndarray, box: Dict) -> float:
-    """Calculate dark pixel ratio in a bubble region."""
+    """Dark-pixel ratio inside a bubble region. 0.0–1.0."""
     x = max(0, int(round(box.get("x", 0))))
     y = max(0, int(round(box.get("y", 0))))
     w = int(round(box.get("w", 0)))
     h = int(round(box.get("h", 0)))
+
+    img_h, img_w = image.shape[:2]
+    x = min(x, img_w - 1)
+    y = min(y, img_h - 1)
+    w = min(w, img_w - x)
+    h = min(h, img_h - y)
+
     if w <= 0 or h <= 0:
         return 0.0
-    x = min(x, image.shape[1] - 1)
-    y = min(y, image.shape[0] - 1)
-    w = min(w, image.shape[1] - x)
-    h = min(h, image.shape[0] - y)
-    region = image[y:y+h, x:x+w]
+
+    region = image[y:y + h, x:x + w]
     if region.size == 0:
         return 0.0
-    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) if len(region.shape) == 3 else region
-    _, binary = cv2.threshold(gray, 140, 255, cv2.THRESH_BINARY_INV)
+
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) if region.ndim == 3 else region
+    _, binary = cv2.threshold(gray, config.OMR_BINARY_THRESHOLD, 255, cv2.THRESH_BINARY_INV)
     return float(np.sum(binary > 0) / binary.size)
 
 
@@ -40,19 +47,21 @@ def evaluate_mc(
     options: Dict[str, Dict],
     correct_option: Optional[str] = None,
 ) -> Dict:
-    """Evaluate multiple-choice. Returns selected, correctness, explanation."""
+    """
+    Multiple choice (exactly one answer).
+    Returns dict with selected, isBlank, isCorrect, confidence, fillRatios,
+    explanation, needsReview.
+    """
     if not options:
-        return {"selected": None, "isBlank": True, "confidence": 0.0}
+        return {"selected": None, "isBlank": True, "confidence": 0.0,
+                "explanation": "No options in map."}
 
     ratios = {k: round(get_fill_ratio(image, box), 4) for k, box in options.items()}
-
-    # Find options that are clearly filled (above empty border threshold)
-    filled = {k: v for k, v in ratios.items() if v >= FILLED_THRESHOLD}
     max_letter = max(ratios, key=ratios.get)
     max_ratio = ratios[max_letter]
 
-    # Blank: nothing above empty border level
-    if max_ratio < EMPTY_BORDER:
+    # No mark anywhere
+    if max_ratio < config.OMR_EMPTY_BORDER:
         return {
             "selected": None,
             "isBlank": True,
@@ -62,22 +71,21 @@ def evaluate_mc(
             "explanation": "No answer marked.",
         }
 
-    # Select the most filled option (must be above FILLED_THRESHOLD)
-    selected = max_letter if max_ratio >= FILLED_THRESHOLD else None
-
-    if selected is None:
-        # Ambiguous — some mark but not clearly filled
+    # Ambiguous: something dark, but not above filled threshold
+    if max_ratio < config.OMR_FILLED_THRESHOLD:
         return {
             "selected": None,
             "isBlank": False,
             "isCorrect": None,
             "confidence": 0.40,
             "fillRatios": ratios,
-            "explanation": f"Ambiguous mark detected. Highest fill: {max_letter}={max_ratio:.2f}",
+            "explanation": f"Ambiguous mark. Highest fill: {max_letter}={max_ratio:.2f}",
             "needsReview": True,
         }
 
-    # Confidence based on gap between selected and next highest
+    selected = max_letter
+
+    # Confidence via gap between top two ratios
     sorted_ratios = sorted(ratios.values(), reverse=True)
     gap = sorted_ratios[0] - sorted_ratios[1] if len(sorted_ratios) >= 2 else 0.5
     if gap > 0.25:
@@ -89,14 +97,16 @@ def evaluate_mc(
     else:
         confidence = 0.55
 
-    is_correct = (selected == correct_option) if correct_option and selected else None
+    is_correct = (selected == correct_option) if correct_option else None
 
-    explanation = f"Selected {selected}."
     if correct_option:
-        if is_correct:
-            explanation = f"Selected {selected} — Correct."
-        else:
-            explanation = f"Selected {selected}, correct answer is {correct_option}."
+        explanation = (
+            f"Selected {selected} — Correct."
+            if is_correct
+            else f"Selected {selected}, correct answer is {correct_option}."
+        )
+    else:
+        explanation = f"Selected {selected}."
 
     return {
         "selected": selected,
@@ -113,13 +123,16 @@ def evaluate_ms(
     options: Dict[str, Dict],
     correct_options: Optional[List[str]] = None,
 ) -> Dict:
-    """Evaluate multi-select. Per-item detection and scoring."""
+    """
+    Multi-select. Per-item detection and scoring.
+    """
     if not options:
-        return {"selected": [], "isBlank": True, "confidence": 0.0}
+        return {"selected": [], "isBlank": True, "confidence": 0.0,
+                "explanation": "No options in map."}
 
     ratios = {k: round(get_fill_ratio(image, box), 4) for k, box in options.items()}
-    selected = [k for k, v in ratios.items() if v >= FILLED_THRESHOLD]
-    is_blank = all(v < EMPTY_BORDER for v in ratios.values())
+    selected = [k for k, v in ratios.items() if v >= config.OMR_FILLED_THRESHOLD]
+    is_blank = all(v < config.OMR_EMPTY_BORDER for v in ratios.values())
 
     if is_blank:
         return {
@@ -131,11 +144,11 @@ def evaluate_ms(
             "explanation": "No answers marked.",
         }
 
-    # Confidence
-    selected_ratios = [ratios[k] for k in selected] if selected else [0]
+    # Confidence: gap between min-selected and max-unselected
+    selected_ratios = [ratios[k] for k in selected] if selected else [0.0]
     unselected_ratios = [ratios[k] for k in ratios if k not in selected] if selected else list(ratios.values())
-    min_sel = min(selected_ratios) if selected_ratios else 0
-    max_unsel = max(unselected_ratios) if unselected_ratios else 0
+    min_sel = min(selected_ratios) if selected_ratios else 0.0
+    max_unsel = max(unselected_ratios) if unselected_ratios else 0.0
     gap = min_sel - max_unsel
     if gap > 0.20:
         confidence = 0.95
@@ -148,8 +161,7 @@ def evaluate_ms(
 
     is_correct = (set(selected) == set(correct_options)) if correct_options else None
 
-    # Per-item results
-    item_results = {}
+    item_results: Dict[str, Dict] = {}
     correct_count = 0
     wrong_count = 0
 
@@ -168,15 +180,17 @@ def evaluate_ms(
                 "isCorrect": is_item_correct,
             }
 
-    # Explanation
     if correct_options:
-        selected_str = ", ".join(selected) if selected else "none"
-        correct_str = ", ".join(correct_options)
+        sel_str = ", ".join(selected) if selected else "none"
+        cor_str = ", ".join(correct_options)
         if is_correct:
-            explanation = f"Selected [{selected_str}] — All correct."
+            explanation = f"Selected [{sel_str}] — All correct."
         else:
             wrong_items = [k for k, v in item_results.items() if not v["isCorrect"]]
-            explanation = f"Selected [{selected_str}], correct is [{correct_str}]. {wrong_count} mistake(s): {', '.join(wrong_items)}."
+            explanation = (
+                f"Selected [{sel_str}], correct is [{cor_str}]. "
+                f"{wrong_count} mistake(s): {', '.join(wrong_items)}."
+            )
     else:
         explanation = f"Selected [{', '.join(selected)}]."
 
