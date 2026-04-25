@@ -2,9 +2,12 @@
 OMR — Optical Mark Recognition for MC (multiple choice) and MS (multi-select).
 
 Key idea:
-  - An empty MC circle / MS square border alone contributes ~30-35% dark pixels.
-  - A student-filled mark pushes the ratio to 50%+.
-  - A fully blank region stays below 10%.
+  - We crop INSIDE the printed border (inset by config.OMR_INNER_INSET) so
+    the bubble outline doesn't contaminate the fill ratio.
+  - With the inset, an empty bubble reads ~0-5% (clean interior).
+  - A student-filled bubble reads ~80-95%.
+  - The gap is unambiguous — config.OMR_FILLED_THRESHOLD (0.50) cleanly
+    separates them in any realistic scan.
 
 Thresholds live in config.py.
 """
@@ -18,18 +21,25 @@ import config
 
 
 def get_fill_ratio(image: np.ndarray, box: Dict) -> float:
-    """Dark-pixel ratio inside a bubble region. 0.0–1.0."""
-    x = max(0, int(round(box.get("x", 0))))
-    y = max(0, int(round(box.get("y", 0))))
-    w = int(round(box.get("w", 0)))
-    h = int(round(box.get("h", 0)))
+    """Dark-pixel ratio inside the bubble's interior (border excluded). 0.0–1.0."""
+    inset = config.OMR_INNER_INSET
+    x = int(round(box.get("x", 0))) + inset
+    y = int(round(box.get("y", 0))) + inset
+    w = int(round(box.get("w", 0))) - 2 * inset
+    h = int(round(box.get("h", 0))) - 2 * inset
 
+    # Clamp to image bounds, and fall back to no-inset crop if inset would
+    # leave nothing (can happen on tiny degenerate boxes).
     img_h, img_w = image.shape[:2]
-    x = min(x, img_w - 1)
-    y = min(y, img_h - 1)
+    if w <= 0 or h <= 0:
+        x = max(0, int(round(box.get("x", 0))))
+        y = max(0, int(round(box.get("y", 0))))
+        w = int(round(box.get("w", 0)))
+        h = int(round(box.get("h", 0)))
+    x = max(0, min(x, img_w - 1))
+    y = max(0, min(y, img_h - 1))
     w = min(w, img_w - x)
     h = min(h, img_h - y)
-
     if w <= 0 or h <= 0:
         return 0.0
 

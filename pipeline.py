@@ -81,11 +81,18 @@ async def evaluate_question(
     # ── Matching ──
     if q_type == "matching":
         answer_boxes = q_data.get("answerBoxes", {}) or {}
+        # The valid letter set is the union of correct matches — pass it to
+        # the reader so the 26-class CNN collapses to N-class for this question.
+        correct_matches = expected.get("correctMatches", {}) or {}
+        expected_set = {
+            str(v).upper() for v in correct_matches.values()
+            if isinstance(v, str) and len(v) == 1 and v.isalpha()
+        } or None
         ocr_answers: Dict[str, str] = {}
         confidences: Dict[str, float] = {}
         review_flags: Dict[str, bool] = {}
         for idx, box in answer_boxes.items():
-            reader_res = handwriting.read_letter_box(aligned, box)
+            reader_res = handwriting.read_letter_box(aligned, box, expected_set=expected_set)
             ocr_answers[idx] = reader_res.text
             confidences[idx] = reader_res.confidence
             review_flags[idx] = reader_res.needs_review
@@ -98,12 +105,16 @@ async def evaluate_question(
     # ── Fill blanks ──
     if q_type == "fill_blanks":
         answer_boxes = q_data.get("answerBoxes", {}) or {}
+        correct_blanks = expected.get("correctBlanks", {}) or {}
         ocr_answers = {}
         confidences = {}
         review_flags = {}
         sources: Dict[str, str] = {}
         for idx, box in answer_boxes.items():
-            reader_res = handwriting.read_text_box(aligned, box)
+            # Pass per-blank expected so the reader can detect TrOCR misreads
+            # that look confident but don't fuzzy-match the answer key.
+            blank_expected = str(correct_blanks.get(idx, "") or "")
+            reader_res = handwriting.read_text_box(aligned, box, expected=blank_expected)
             ocr_answers[idx] = reader_res.text
             confidences[idx] = reader_res.confidence
             review_flags[idx] = reader_res.needs_review

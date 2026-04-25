@@ -5,3 +5,5 @@ output/
 data/
 .env
 *.egg-info/
+*.bak
+debug_*.py

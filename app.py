@@ -19,6 +19,19 @@ except AttributeError:
 import json
 import os
 
+# ── Thread tuning: must run BEFORE torch / opencv import models ──
+# PyTorch defaults to a conservative thread count on CPU; large encoder-
+# decoder models (TrOCR-large) gain 1.5-3x wallclock from using all cores.
+# OMP_NUM_THREADS also affects numpy/BLAS paths used by opencv.
+_NUM_THREADS = max(1, (os.cpu_count() or 1))
+os.environ.setdefault("OMP_NUM_THREADS", str(_NUM_THREADS))
+os.environ.setdefault("MKL_NUM_THREADS", str(_NUM_THREADS))
+try:
+    import torch
+    torch.set_num_threads(_NUM_THREADS)
+except Exception:
+    pass
+
 import cv2
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -38,10 +51,28 @@ os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
 @app.on_event("startup")
 async def _preload():
+    print(f"[Startup] torch.num_threads = {_NUM_THREADS}")
     try:
-        from handwriting import _load_digit_cnn, _ensure_tesseract
+        from handwriting import (
+            _load_digit_cnn,
+            _ensure_tesseract,
+            _load_letter_cnn,
+            _load_trocr,
+            _ensure_trocr_bad_words,
+            _ensure_trocr_digit_bad_words,
+        )
+        # Cheap preloads — milliseconds.
         _load_digit_cnn()
         _ensure_tesseract()
+        _load_letter_cnn()
+        # Heavy preloads — TrOCR weights (~1.3 GB) + bad_words token tables.
+        # Without this, the first /evaluate request pays ~5-10 s building the
+        # 50k-token digit-only block list. With it, that cost is paid once at
+        # startup and the first request is as fast as the second.
+        _load_trocr()
+        _ensure_trocr_bad_words()
+        _ensure_trocr_digit_bad_words()
+        print("[Startup] All readers warm")
     except Exception as e:
         print(f"[Startup] Preload warning: {e}")
 
@@ -121,6 +152,84 @@ async def download_excel(exam_id: str):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Excel not found. Run /evaluate first.")
     return FileResponse(path, filename=f"{exam_id}_results.xlsx")
+
+
+@app.post("/debug/annotate")
+async def annotate_endpoint(
+    pdf_file: UploadFile = File(...),
+    map_file: UploadFile = File(...),
+):
+    """
+    Generate annotated overlay images for visual alignment validation.
+
+    For each page in the map JSON, the corresponding scanned page is annotated
+    with color-coded boxes (anchors red, student region purple, questions
+    green, options blue, solution areas orange, matching yellow, fill_blanks
+    light green). The original scan is NOT warped — annotations are placed
+    using the canonical->scanned transform context.
+
+    Use this BEFORE running /evaluate to confirm the map JSON aligns properly
+    with the actual scan. The footer banner shows transform mode + anchor
+    count.
+
+    Returns:
+        - annotatedPages: list of file paths under OUTPUT_DIR/annotated/
+        - perPageInfo: transform mode + anchor count per page
+    """
+    try:
+        map_content = await map_file.read()
+        exam_map = json.loads(map_content)
+        pdf_content = await pdf_file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read files: {e}")
+
+    images = pdf_to_images(pdf_content)
+    pages = exam_map.get("pages", []) or []
+    if not pages:
+        raise HTTPException(status_code=400, detail="Map has no 'pages' array")
+
+    debug_dir = os.path.join(config.OUTPUT_DIR, "annotated")
+    os.makedirs(debug_dir, exist_ok=True)
+
+    saved: list = []
+    per_page_info: list = []
+
+    # Annotate the first occurrence of each canonical page (page index in the map).
+    # For multi-student PDFs we just sample the first instance.
+    n_pages_to_render = min(len(images), len(pages))
+    for page_index in range(n_pages_to_render):
+        scanned = images[page_index]
+        page_data = pages[page_index]
+
+        try:
+            annotated, ctx = alignment.annotate_page(scanned, page_data)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Annotation failed for page {page_index + 1}: {str(e)[:200]}",
+            )
+
+        page_id = page_data.get("pageId", f"page_{page_index + 1}")
+        out_path = os.path.join(debug_dir, f"annotated_{page_id}.jpg")
+        cv2.imwrite(out_path, annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        saved.append(out_path)
+        per_page_info.append({
+            "pageId": page_id,
+            "transformMode": ctx.mode,
+            "anchorsDetected": ctx.n_anchors_detected,
+            "scaleX": round(ctx.scale_x, 4),
+            "scaleY": round(ctx.scale_y, 4),
+            "offsetX": round(ctx.offset_x, 2),
+            "offsetY": round(ctx.offset_y, 2),
+        })
+
+    return {
+        "annotatedPages": saved,
+        "perPageInfo": per_page_info,
+        "count": len(saved),
+    }
 
 
 # ── Local run ─────────────────────────────────────────────────────
