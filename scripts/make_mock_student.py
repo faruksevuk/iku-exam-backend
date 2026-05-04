@@ -43,7 +43,18 @@ OUT_IKU = OUT_DIR / "mock_filled.ikuexam"
 
 EXAM_ID = "mock-allTypes-2026"
 
-USER_DATA = Path(os.environ.get("APPDATA", "")) / "iku-exam-generator" / "exams"
+def _resolve_user_data() -> Path:
+    """Bypass WindowsApps Python's virtualized APPDATA so installs
+    land in the real Roaming\\iku-exam-generator\\exams folder
+    where the Electron app reads from."""
+    home = Path(os.path.expanduser("~"))
+    candidate = home / "AppData" / "Roaming" / "iku-exam-generator" / "exams"
+    if candidate.parent.exists():
+        return candidate
+    return Path(os.environ.get("APPDATA", "")) / "iku-exam-generator" / "exams"
+
+
+USER_DATA = _resolve_user_data()
 
 # ── Page geometry ────────────────────────────────────────────────────
 # The map.json's pageWidth/pageHeight stays at 756×1086 (the v6 sample
