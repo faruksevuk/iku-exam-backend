@@ -101,6 +101,16 @@ def score_ms(omr_result: Dict, scoring: Dict, expected: Dict) -> Dict[str, Any]:
     wrong_selections = selected - expected_set
     missed = expected_set - selected
 
+    # When the teacher didn't set a `penaltyPerItem`, an extra wrong
+    # selection used to cost 0 points — so a student who picked
+    # ALL options would receive full credit since correct_selections
+    # equalled expected_set. The user reported [A,B,C] vs answer
+    # [A,B] giving 10/10. Default the penalty to one correct's worth
+    # so each wrong pick deducts what a correct one would have added.
+    # Teachers can still set penaltyPerItem explicitly to override.
+    if penalty == 0 and wrong_selections:
+        penalty = points_per_correct
+
     score = len(correct_selections) * points_per_correct - len(wrong_selections) * penalty
     score = max(0.0, round(score, 2))
 

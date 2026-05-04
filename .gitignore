@@ -7,3 +7,9 @@ data/
 *.egg-info/
 *.bak
 debug_*.py
+
+# Local test artifacts (Phase 6)
+.venv/
+samples/blanks/
+samples/mock/
+samples/mock-students/

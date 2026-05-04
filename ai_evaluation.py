@@ -29,6 +29,8 @@ from typing import Any, Dict, Optional
 import config
 import handwriting
 
+import exam_evaluator # Ai exam evaluator
+
 
 # ── Safety prompt (used only when AI_ENABLED=True) ────────────────
 
@@ -123,7 +125,7 @@ def _fallback_result(student_text: str, reader_conf: float, error: Optional[str]
     }
 
 
-# ── LLM grading (future — only called when AI_ENABLED) ────────────
+# ── LLM grading (only called when AI_ENABLED) ────────────
 
 async def _grade_with_llm(
     question_text: str,
@@ -131,15 +133,33 @@ async def _grade_with_llm(
     max_points: float,
     student_text: str,
 ) -> Dict[str, Any]:
-    """
-    Placeholder LLM grading. Stub that always raises — disabled in placeholder mode.
-    When implementing real AI, swap this body with your provider (Ollama / API).
-    """
-    # Disabled: we intentionally don't reach here unless AI_ENABLED=True AND
-    # a provider is plugged in. Caller catches the exception.
-    raise NotImplementedError(
-        "AI grading is not implemented. Set config.AI_ENABLED=False to use placeholder mode."
+    result = await asyncio.to_thread(
+        exam_evaluator.grade_open_ended_answer,
+        question=question_text,
+        answer_key=rubric_text,
+        student_answer=student_text,
+        max_points=max_points
     )
+
+    if result.get("status") == "error":
+        return {
+            "score": 0.0,
+            "confidence": 0.0,
+            "status": "ai_error",
+            "explanation": result.get("justification", "Unknown AI error"),
+            "needsReview": True
+        }
+
+    needs_review = result.get("requires_human_review", False) or result.get("is_fatal_failure", False)
+    confidence = 0.50 if needs_review else 0.95
+
+    return {
+        "score": result.get("final_score", 0.0),
+        "confidence": confidence,
+        "status": "ai_graded",
+        "explanation": result.get("justification", ""),
+        "needsReview": needs_review
+    }
 
 
 def _parse_llm_json(text: str, max_points: float) -> Dict[str, Any]:
