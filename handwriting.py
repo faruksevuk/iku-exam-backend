@@ -875,8 +875,6 @@ def read_letter_box(
     multiple readers is safe (worst case adds compute, never adds wrong
     letters from thin air).
     """
-    PADS_TO_TRY = (10, 8, 12, 6)
-
     # Normalize expected_set to upper-case single-letter members
     allowed: Optional[set] = None
     if expected_set:
@@ -887,64 +885,85 @@ def read_letter_box(
         if not allowed:
             allowed = None
 
-    crop_default = preprocessing.crop_for_reading(aligned_image, box, pad=10)
-    if preprocessing.is_blank(crop_default):
+    # Blank-detection probe — use a light-inset crop for the threshold check.
+    blank_probe = preprocessing.crop_for_reading(aligned_image, box, pad=10)
+    if preprocessing.is_blank(blank_probe):
         return ReaderResult(text="", confidence=1.0, source="blank", needs_review=False)
 
     candidates: list = []  # (letter, conf, source_label)
 
-    # Pass 1: EMNIST LetterCNN — ensemble over two insets (4, 6).
+    # Pass 1: EMNIST LetterCNN — ensemble over (0, 2, 4) using SIMPLE
+    # preprocessing (no largest-connected-component selection).
     #
-    # Why 4 and 6 specifically: the printed answer-box border on a 200dpi scan
-    # is ~1-2 px thick, and matching boxes can be as short as ~24 px tall.
-    # Larger insets (e.g. 8) would eat the entire letter on these small boxes
-    # — the post-edge-zero crop becomes empty and the CNN classifies a black
-    # canvas. Inset=4 keeps the letter intact even on small boxes; inset=6
-    # provides a safer border-sliver margin for taller boxes. Voting across
-    # both via the existing candidate pool catches both regimes.
-    for inset in (4, 6):
-        cnn_crop = preprocessing.crop_for_letter_cnn(aligned_image, box, inset=inset)
-        if cnn_crop.sum() > 100:  # has visible content
-            cnn_result = _classify_letter(cnn_crop, allowed=allowed)
-            if cnn_result is not None:
-                letter, conf = cnn_result
-                candidates.append((letter, conf, f"letter_cnn(inset={inset})"))
+    # Why simple preprocessing: the aggressive variant (`crop_for_letter_cnn`)
+    # picks the largest connected component of the binarized crop. On
+    # multi-stroke letters where Otsu disconnects parts (e.g. a hand-drawn
+    # "B" whose two bowls don't quite touch the spine), it drops real
+    # strokes — and on small insets where the printed answer-box border
+    # bleeds in, it picks the BORDER as the largest CC and feeds the CNN a
+    # warped shape. Both regimes were producing confident "A" reads on
+    # actual "B" handwriting (verified against student 0012346900 Q4).
+    #
+    # Why insets (0, 2, 4): per user direction — keep cropping minimal.
+    # Mild edge-zero (2 px) inside `crop_for_letter_cnn_simple` handles
+    # thin printed-border slivers without eating letter strokes.
+    #
+    # NOISE GATE: when the within-allowed pick has confidence below
+    # CNN_NOISE_FLOOR, the unrestricted top-1 is almost always far outside
+    # `allowed` (CNN saw e.g. "D 0.77" while allowed is {A,B}). Letting
+    # that ~0.04 noise into the pool actively misleads the max-by-conf
+    # selection. Drop noise reads outright.
+    CNN_NOISE_FLOOR = 0.05
 
-    # Pass 2: Tesseract psm=10 + whitelist with multiple paddings
-    for pad in PADS_TO_TRY:
-        crop = preprocessing.crop_for_reading(aligned_image, box, pad=pad)
+    # Pass 1: EMNIST LetterCNN at insets (0, 2) — minimal cropping per user
+    # direction. Simple preprocessing (no largest-CC) preserves multi-stroke
+    # letters that Otsu would otherwise disconnect.
+    for inset in (0, 2):
+        cnn_crop = preprocessing.crop_for_letter_cnn_simple(aligned_image, box, inset=inset)
+        if cnn_crop.sum() <= 100:
+            continue
+        cnn_result = _classify_letter(cnn_crop, allowed=allowed)
+        if cnn_result is None:
+            continue
+        letter, conf = cnn_result
+        if allowed is not None and conf < CNN_NOISE_FLOOR:
+            continue
+        candidates.append((letter, conf, f"letter_cnn(inset={inset})"))
+
+    # Pass 2: Tesseract psm=10 + A-Z whitelist at insets (0, 2) with a
+    # generous white pad. Tesseract's layout analyzer needs enough white
+    # margin to lock onto the character — too little (pad<10) and inset=0
+    # crops where the printed border touches the bbox edge confuse it
+    # (tested: pad=8 dropped Box 2's clean "A" from 0.96 to 0.0 conf).
+    # Pad=12 keeps the letter well-isolated whether or not the printed
+    # border is included.
+    for inset in (0, 2):
+        inner = preprocessing.crop_inside_border(aligned_image, box, inset=inset)
+        if inner.size == 0:
+            continue
+        crop = preprocessing.pad_white(inner, pad=12)
         if preprocessing.is_blank(crop):
             continue
         letter, conf = _read_letter_tesseract(crop)
         if letter and (allowed is None or letter in allowed):
-            candidates.append((letter, conf, f"tesseract(pad={pad})"))
+            candidates.append((letter, conf, f"tesseract(inset={inset})"))
 
-    # Pass 3: TrOCR fallback. Skipped when CNN+Tesseract already give a
-    # strong cross-validated answer (CNN ≥ 0.95 with at least one Tesseract
-    # padding agreeing on the same letter at conf ≥ 0.30). TrOCR-large is
-    # ~2-6 s on CPU; running it when we already have two independent readers
-    # converging at high confidence is pure cost with no reading-quality
-    # upside. Whenever even ONE of those conditions fails, we still run it,
-    # so the cross-check fires for every uncertain or borderline case.
-    SKIP_TROCR_CNN_CONF = 0.95
-    SKIP_TROCR_TESS_CONF = 0.30
-    cnn_strong = next(
-        ((c[0], c[1]) for c in candidates
-         if c[2].startswith("letter_cnn") and c[1] >= SKIP_TROCR_CNN_CONF),
-        None,
-    )
-    tess_agrees = cnn_strong is not None and any(
-        c[2].startswith("tesseract") and c[0] == cnn_strong[0]
-        and c[1] >= SKIP_TROCR_TESS_CONF
-        for c in candidates
-    )
-    if not (cnn_strong and tess_agrees):
-        trocr_text, trocr_conf = _read_trocr(crop_default)
-        letters_only = "".join(c for c in (trocr_text or "").upper() if c.isalpha())
-        if allowed is not None:
-            letters_only = "".join(c for c in letters_only if c in allowed)
-        if letters_only:
-            candidates.append((letters_only[0], trocr_conf * 0.85, "trocr_first"))
+    # Pass 3: TrOCR on the RAW box image (no inside-border crop) — per
+    # user direction. Calligraphic handwriting (e.g. a "B" with a bottom
+    # flourish) often has strokes that extend close to the printed border;
+    # `crop_inside_border` truncates those descenders. Feeding TrOCR the
+    # full bounding box with a generous white margin lets the line-trained
+    # transformer see the letter in full context.
+    trocr_raw = preprocessing.crop_region(aligned_image, box)
+    if trocr_raw.size > 0:
+        trocr_input = preprocessing.pad_white(trocr_raw, pad=14)
+        if not preprocessing.is_blank(trocr_input):
+            trocr_text, trocr_conf = _read_trocr(trocr_input)
+            letters_only = "".join(c for c in (trocr_text or "").upper() if c.isalpha())
+            if allowed is not None:
+                letters_only = "".join(c for c in letters_only if c in allowed)
+            if letters_only:
+                candidates.append((letters_only[0], trocr_conf * 0.85, "trocr_raw"))
 
     if not candidates:
         return ReaderResult(
@@ -971,13 +990,62 @@ def read_letter_box(
     # happened to agree but never load-bearing.
     best = max(candidates, key=lambda c: c[1])
 
-    # Diagnostic only: how many readers happened to agree on the winner.
-    # Does NOT modify confidence — kept for raw_debug visibility.
+    # Vote tally — the share of "real" readers (above the 0.10 noise floor)
+    # that agree with the top-confidence pick. Key signal for ambiguous
+    # handwriting: when the user's "B" looks "A"-like to most readers,
+    # `best` may be high-conf "A" while a substantial minority votes "B".
+    # We can't auto-pick the right answer in that case, but we can refuse
+    # to claim certainty and route the cell to manual review.
     real_votes = [c for c in candidates if c[1] >= 0.10]
-    agreeing = sum(1 for c in real_votes if c[0] == best[0])
+    if real_votes:
+        from collections import Counter as _Counter
+        tally = _Counter(c[0] for c in real_votes)
+        top_letter, top_count = tally.most_common(1)[0]
+        agreeing = top_count
+        vote_share = top_count / len(real_votes)
+        # If `best`'s letter isn't even the majority pick, prefer the
+        # majority letter at its highest-conf reader. Catches the failure
+        # mode where a single 0.85 reader outvotes 4 readers at 0.50.
+        if top_letter != best[0] and top_count > sum(1 for c in real_votes if c[0] == best[0]):
+            best = max((c for c in candidates if c[0] == top_letter), key=lambda c: c[1])
+    else:
+        agreeing = 1
+        vote_share = 1.0
 
     final_conf = float(best[1])
-    needs_review = final_conf < config.HIGH_CONF_THRESHOLD
+    # Disagreement-aware review flag. With the simpler 4-reader pool
+    # (2 CNN + 1-2 Tesseract + 1 TrOCR), individual reader confidences
+    # naturally land lower than the old 9-reader pool — so the standard
+    # `conf < HIGH_CONF_THRESHOLD` rule alone would over-flag clean
+    # consensus reads. Trigger review on REAL disagreement instead:
+    #   1. Vote share < 0.66 — a substantial minority disputes the pick.
+    #   2. Strong dissent — any reader at conf ≥ 0.30 picked a different
+    #      letter than the winner (TrOCR's "B 0.36" on the user's
+    #      calligraphic B is exactly this case).
+    #   3. Solo low-confidence — only one reader supports the winner AND
+    #      that reader's conf is below 0.60. Catches the case where
+    #      most readers were filtered as noise.
+    DISAGREEMENT_THRESHOLD = 0.66
+    STRONG_DISSENT_CONF = 0.30
+    SOLO_LOW_CONF = 0.60
+
+    strong_dissent = any(
+        c[0] != best[0] and c[1] >= STRONG_DISSENT_CONF
+        for c in candidates
+    )
+    best_supporters = sum(1 for c in real_votes if c[0] == best[0])
+    solo_low = best_supporters <= 1 and final_conf < SOLO_LOW_CONF
+
+    if vote_share < DISAGREEMENT_THRESHOLD:
+        final_conf = min(final_conf, vote_share)
+        needs_review = True
+    elif strong_dissent:
+        final_conf = min(final_conf, 0.65)
+        needs_review = True
+    elif solo_low:
+        needs_review = True
+    else:
+        needs_review = False
     return ReaderResult(
         text=best[0],
         confidence=round(min(final_conf, 1.0), 4),
@@ -986,7 +1054,11 @@ def read_letter_box(
         raw_debug={
             "all_candidates": candidates,
             "agreeing_sources": agreeing,
-        } if config.VERBOSE else {"agreeing_sources": agreeing},
+            "vote_share": round(vote_share, 3),
+        } if config.VERBOSE else {
+            "agreeing_sources": agreeing,
+            "vote_share": round(vote_share, 3),
+        },
     )
 
 

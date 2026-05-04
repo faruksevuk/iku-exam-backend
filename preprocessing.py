@@ -173,6 +173,43 @@ def crop_for_letter(aligned: np.ndarray, box: Dict) -> np.ndarray:
     return crop_for_reading(aligned, box, pad=10)
 
 
+def crop_for_letter_cnn_simple(aligned: np.ndarray, box: Dict, inset: int = 2) -> np.ndarray:
+    """
+    Minimal preprocessing for the letter CNN — preserves the FULL letter
+    shape. Avoids the aggressive largest-connected-component selection used
+    by `crop_for_letter_cnn`, which can mangle multi-stroke letters (e.g.
+    drop one bowl of a "B" if Otsu disconnects it from the spine, or pick
+    up a printed border sliver as the largest CC and warp the shape).
+
+    Pipeline:
+      1. Crop inside the printed box border by `inset` px (small inset to
+         keep cropping minimal — user-tuned default is 2).
+      2. Grayscale + Otsu binarize (white text on black bg, EMNIST shape).
+      3. Light edge-zero (2 px) — kills 1-2 px border slivers, doesn't
+         eat letter strokes.
+      4. INTER_AREA resize to 28x28.
+
+    Trade-off vs. the aggressive variant: keeps stray noise specks if any
+    survived edge-zero, but for clean printed exam scans those are rare,
+    and dropping a real stroke is far worse than including a speck.
+    """
+    inner = crop_inside_border(aligned, box, inset=inset)
+    if inner.size == 0 or inner.shape[0] < 4 or inner.shape[1] < 4:
+        return np.zeros((28, 28), dtype=np.uint8)
+
+    gray = to_gray(inner)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    edge = 2
+    th[:edge, :] = 0
+    th[-edge:, :] = 0
+    th[:, :edge] = 0
+    th[:, -edge:] = 0
+
+    return cv2.resize(th, (28, 28), interpolation=cv2.INTER_AREA)
+
+
 def crop_for_letter_cnn(aligned: np.ndarray, box: Dict, inset: int = 6) -> np.ndarray:
     """
     EMNIST-style 28x28 crop for the letter CNN classifier.
