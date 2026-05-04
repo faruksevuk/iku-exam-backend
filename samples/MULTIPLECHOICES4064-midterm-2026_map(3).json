@@ -1,0 +1,381 @@
+{
+  "version": 2,
+  "examId": "4064-midterm-2026",
+  "generatedAt": "2026-04-19T22:48:12.629Z",
+  "courseCode": "4064",
+  "examType": "midterm",
+  "date": "2026-04-23",
+  "totalPages": 1,
+  "pages": [
+    {
+      "pageId": "P1_4064_midterm_2026",
+      "pageIndex": 0,
+      "pageWidth": 756,
+      "pageHeight": 1086,
+      "anchors": {
+        "TL": {
+          "type": "bullseye",
+          "center": {
+            "x": 11,
+            "y": 11
+          },
+          "diameter": 16
+        },
+        "TR": {
+          "type": "bullseye",
+          "center": {
+            "x": 745,
+            "y": 11
+          },
+          "diameter": 16
+        },
+        "BL": {
+          "type": "bullseye",
+          "center": {
+            "x": 11,
+            "y": 1075
+          },
+          "diameter": 16
+        },
+        "BR": {
+          "type": "bullseye",
+          "center": {
+            "x": 745,
+            "y": 1075
+          },
+          "diameter": 16
+        }
+      },
+      "studentNumberRegion": {
+        "x": 421.4,
+        "y": 109.7,
+        "w": 324.6,
+        "h": 72.3
+      },
+      "studentNumberBoxes": [
+        {
+          "x": 430.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 461.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 492.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 523.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 554.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 585.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 616.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 647.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 678.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 709.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        }
+      ],
+      "questions": {
+        "1": {
+          "type": "multiple_choice",
+          "boundingBox": {
+            "x": 10,
+            "y": 310,
+            "w": 363,
+            "h": 149.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 4
+          },
+          "expectedAnswer": {
+            "correctOption": "A"
+          },
+          "options": {
+            "A": {
+              "x": 20.6,
+              "y": 383.9,
+              "w": 12,
+              "h": 12
+            },
+            "B": {
+              "x": 20.6,
+              "y": 400.5,
+              "w": 12,
+              "h": 12
+            },
+            "C": {
+              "x": 20.6,
+              "y": 417,
+              "w": 12,
+              "h": 12
+            },
+            "D": {
+              "x": 20.6,
+              "y": 433.5,
+              "w": 12,
+              "h": 12
+            }
+          }
+        },
+        "2": {
+          "type": "multiple_choice",
+          "boundingBox": {
+            "x": 10,
+            "y": 463,
+            "w": 736,
+            "h": 133.4
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 4
+          },
+          "expectedAnswer": {
+            "correctOption": "B"
+          },
+          "options": {
+            "A": {
+              "x": 20.6,
+              "y": 521,
+              "w": 12,
+              "h": 12
+            },
+            "B": {
+              "x": 20.6,
+              "y": 537.5,
+              "w": 12,
+              "h": 12
+            },
+            "C": {
+              "x": 20.6,
+              "y": 554,
+              "w": 12,
+              "h": 12
+            },
+            "D": {
+              "x": 20.6,
+              "y": 570.5,
+              "w": 12,
+              "h": 12
+            }
+          }
+        },
+        "3": {
+          "type": "multiple_choice",
+          "boundingBox": {
+            "x": 10,
+            "y": 600,
+            "w": 363,
+            "h": 149.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 4
+          },
+          "expectedAnswer": {
+            "correctOption": "D"
+          },
+          "options": {
+            "A": {
+              "x": 20.6,
+              "y": 674,
+              "w": 12,
+              "h": 12
+            },
+            "B": {
+              "x": 20.6,
+              "y": 690.5,
+              "w": 12,
+              "h": 12
+            },
+            "C": {
+              "x": 20.6,
+              "y": 707,
+              "w": 12,
+              "h": 12
+            },
+            "D": {
+              "x": 20.6,
+              "y": 723.5,
+              "w": 12,
+              "h": 12
+            }
+          }
+        },
+        "4": {
+          "type": "multiple_choice",
+          "boundingBox": {
+            "x": 383,
+            "y": 600,
+            "w": 363,
+            "h": 149.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 4
+          },
+          "expectedAnswer": {
+            "correctOption": "C"
+          },
+          "options": {
+            "A": {
+              "x": 393.6,
+              "y": 674,
+              "w": 12,
+              "h": 12
+            },
+            "B": {
+              "x": 393.6,
+              "y": 690.5,
+              "w": 12,
+              "h": 12
+            },
+            "C": {
+              "x": 393.6,
+              "y": 707,
+              "w": 12,
+              "h": 12
+            },
+            "D": {
+              "x": 393.6,
+              "y": 723.5,
+              "w": 12,
+              "h": 12
+            }
+          }
+        },
+        "5": {
+          "type": "multiple_choice",
+          "boundingBox": {
+            "x": 10,
+            "y": 753,
+            "w": 736,
+            "h": 133.4
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 4
+          },
+          "expectedAnswer": {
+            "correctOption": "A"
+          },
+          "options": {
+            "A": {
+              "x": 20.6,
+              "y": 811,
+              "w": 12,
+              "h": 12
+            },
+            "B": {
+              "x": 20.6,
+              "y": 827.5,
+              "w": 12,
+              "h": 12
+            },
+            "C": {
+              "x": 20.6,
+              "y": 844,
+              "w": 12,
+              "h": 12
+            },
+            "D": {
+              "x": 20.6,
+              "y": 860.5,
+              "w": 12,
+              "h": 12
+            }
+          }
+        },
+        "6": {
+          "type": "multi_select",
+          "boundingBox": {
+            "x": 10,
+            "y": 890,
+            "w": 363,
+            "h": 149.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 4
+          },
+          "expectedAnswer": {
+            "correctOptions": [
+              "C"
+            ]
+          },
+          "options": {
+            "A": {
+              "x": 20.6,
+              "y": 964,
+              "w": 12,
+              "h": 12
+            },
+            "B": {
+              "x": 20.6,
+              "y": 980.5,
+              "w": 12,
+              "h": 12
+            },
+            "C": {
+              "x": 20.6,
+              "y": 997,
+              "w": 12,
+              "h": 12
+            },
+            "D": {
+              "x": 20.6,
+              "y": 1013.5,
+              "w": 12,
+              "h": 12
+            }
+          }
+        }
+      }
+    }
+  ]
+}

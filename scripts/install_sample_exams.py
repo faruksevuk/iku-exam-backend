@@ -27,7 +27,17 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-USER_DATA = Path(os.environ.get("APPDATA", "")) / "iku-exam-generator" / "exams"
+def _resolve_user_data() -> Path:
+    """Bypass WindowsApps Python's virtualized APPDATA so installs
+    land in the real Roaming\\iku-exam-generator\\exams folder."""
+    home = Path(os.path.expanduser("~"))
+    candidate = home / "AppData" / "Roaming" / "iku-exam-generator" / "exams"
+    if candidate.parent.exists():
+        return candidate
+    return Path(os.environ.get("APPDATA", "")) / "iku-exam-generator" / "exams"
+
+
+USER_DATA = _resolve_user_data()
 
 NOW = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

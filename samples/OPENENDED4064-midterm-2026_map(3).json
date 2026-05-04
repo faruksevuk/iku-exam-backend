@@ -1,0 +1,253 @@
+{
+  "version": 2,
+  "examId": "4064-midterm-2026",
+  "generatedAt": "2026-04-19T22:41:48.778Z",
+  "courseCode": "4064",
+  "examType": "midterm",
+  "date": "2026-04-23",
+  "totalPages": 1,
+  "pages": [
+    {
+      "pageId": "P1_4064_midterm_2026",
+      "pageIndex": 0,
+      "pageWidth": 756,
+      "pageHeight": 1086,
+      "anchors": {
+        "TL": {
+          "type": "bullseye",
+          "center": {
+            "x": 11,
+            "y": 11
+          },
+          "diameter": 16
+        },
+        "TR": {
+          "type": "bullseye",
+          "center": {
+            "x": 745,
+            "y": 11
+          },
+          "diameter": 16
+        },
+        "BL": {
+          "type": "bullseye",
+          "center": {
+            "x": 11,
+            "y": 1075
+          },
+          "diameter": 16
+        },
+        "BR": {
+          "type": "bullseye",
+          "center": {
+            "x": 745,
+            "y": 1075
+          },
+          "diameter": 16
+        }
+      },
+      "studentNumberRegion": {
+        "x": 421.4,
+        "y": 109.7,
+        "w": 324.6,
+        "h": 72.3
+      },
+      "studentNumberBoxes": [
+        {
+          "x": 430.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 461.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 492.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 523.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 554.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 585.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 616.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 647.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 678.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 709.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        }
+      ],
+      "questions": {
+        "1": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 10,
+            "y": 297,
+            "w": 363,
+            "h": 130.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "MVVM"
+          },
+          "solutionArea": {
+            "x": 20.6,
+            "y": 371.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "2": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 383,
+            "y": 297,
+            "w": 363,
+            "h": 146.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "callback function"
+          },
+          "solutionArea": {
+            "x": 393.6,
+            "y": 387.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "3": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 10,
+            "y": 431,
+            "w": 363,
+            "h": 130.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "SQLite"
+          },
+          "solutionArea": {
+            "x": 20.6,
+            "y": 505.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "4": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 383,
+            "y": 447,
+            "w": 363,
+            "h": 130.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "setState()"
+          },
+          "solutionArea": {
+            "x": 393.6,
+            "y": 521.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "5": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 10,
+            "y": 565,
+            "w": 363,
+            "h": 114.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "injects updated code files into a running application without requiring a full recompile or app restart"
+          },
+          "solutionArea": {
+            "x": 20.6,
+            "y": 623.8,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "6": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 383,
+            "y": 581,
+            "w": 363,
+            "h": 245.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "The main difference between a StatelessWidget and a StatefulWidget in Flutter is whether they can change their internal data and appearance after being built. "
+          },
+          "solutionArea": {
+            "x": 393.6,
+            "y": 655.7,
+            "w": 341.8,
+            "h": 160
+          }
+        }
+      }
+    }
+  ]
+}

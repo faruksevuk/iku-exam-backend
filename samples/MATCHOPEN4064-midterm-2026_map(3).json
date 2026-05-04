@@ -1,0 +1,275 @@
+{
+  "version": 2,
+  "examId": "4064-midterm-2026",
+  "generatedAt": "2026-04-19T22:49:32.619Z",
+  "courseCode": "4064",
+  "examType": "midterm",
+  "date": "2026-04-23",
+  "totalPages": 1,
+  "pages": [
+    {
+      "pageId": "P1_4064_midterm_2026",
+      "pageIndex": 0,
+      "pageWidth": 756,
+      "pageHeight": 1086,
+      "anchors": {
+        "TL": {
+          "type": "bullseye",
+          "center": {
+            "x": 11,
+            "y": 11
+          },
+          "diameter": 16
+        },
+        "TR": {
+          "type": "bullseye",
+          "center": {
+            "x": 745,
+            "y": 11
+          },
+          "diameter": 16
+        },
+        "BL": {
+          "type": "bullseye",
+          "center": {
+            "x": 11,
+            "y": 1075
+          },
+          "diameter": 16
+        },
+        "BR": {
+          "type": "bullseye",
+          "center": {
+            "x": 745,
+            "y": 1075
+          },
+          "diameter": 16
+        }
+      },
+      "studentNumberRegion": {
+        "x": 421.4,
+        "y": 109.7,
+        "w": 324.6,
+        "h": 72.3
+      },
+      "studentNumberBoxes": [
+        {
+          "x": 430.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 461.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 492.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 523.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 554.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 585.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 616.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 647.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 678.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        },
+        {
+          "x": 709.2,
+          "y": 130.1,
+          "w": 28,
+          "h": 34
+        }
+      ],
+      "questions": {
+        "1": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 10,
+            "y": 323,
+            "w": 363,
+            "h": 130.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "Answer is define: MVVM"
+          },
+          "solutionArea": {
+            "x": 20.6,
+            "y": 397.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "2": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 383,
+            "y": 323,
+            "w": 363,
+            "h": 146.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "callback function"
+          },
+          "solutionArea": {
+            "x": 393.6,
+            "y": 413.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "3": {
+          "type": "open_ended",
+          "boundingBox": {
+            "x": 10,
+            "y": 457,
+            "w": 363,
+            "h": 130.3
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": null
+          },
+          "expectedAnswer": {
+            "text": "SQLite"
+          },
+          "solutionArea": {
+            "x": 20.6,
+            "y": 531.7,
+            "w": 341.8,
+            "h": 45
+          }
+        },
+        "4": {
+          "type": "fill_blanks",
+          "boundingBox": {
+            "x": 383,
+            "y": 473,
+            "w": 363,
+            "h": 141.6
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 1
+          },
+          "expectedAnswer": {
+            "correctBlanks": {
+              "1": "pubspec.yaml"
+            }
+          },
+          "fillBlanks": {
+            "1": {
+              "x": 637.7,
+              "y": 530.6,
+              "w": 50,
+              "h": 12
+            }
+          },
+          "answerSection": {
+            "x": 393.6,
+            "y": 556.8,
+            "w": 341.8,
+            "h": 47.2
+          },
+          "answerBoxes": {
+            "1": {
+              "x": 420.2,
+              "y": 571.3,
+              "w": 150,
+              "h": 24
+            }
+          }
+        },
+        "5": {
+          "type": "matching",
+          "boundingBox": {
+            "x": 10,
+            "y": 619,
+            "w": 736,
+            "h": 204.7
+          },
+          "scoring": {
+            "points": 10,
+            "penaltyPerItem": 0,
+            "itemCount": 3
+          },
+          "expectedAnswer": {
+            "correctMatches": {
+              "1": "A",
+              "2": "B",
+              "3": "C"
+            }
+          },
+          "answerSection": {
+            "x": 20.6,
+            "y": 765.8,
+            "w": 714.8,
+            "h": 47.2
+          },
+          "answerBoxes": {
+            "1": {
+              "x": 47.2,
+              "y": 780.5,
+              "w": 55,
+              "h": 24
+            },
+            "2": {
+              "x": 129.2,
+              "y": 780.5,
+              "w": 55,
+              "h": 24
+            },
+            "3": {
+              "x": 211.2,
+              "y": 780.5,
+              "w": 55,
+              "h": 24
+            }
+          }
+        }
+      }
+    }
+  ]
+}
