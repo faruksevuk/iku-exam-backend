@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+numpy
+opencv-python
+Pillow
+PyMuPDF
+torch
+torchvision
+transformers
+accelerate
+sentencepiece
+pytesseract
+rapidfuzz
+openpyxl
