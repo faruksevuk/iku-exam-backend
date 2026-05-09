@@ -40,10 +40,11 @@ Renderers must tolerate extra trailing fields and unknown stages.
 """
 
 import asyncio
+import json
 import os
 import time
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -382,6 +383,17 @@ async def evaluate_exam(pdf_bytes: bytes, exam_map: Dict) -> Dict[str, Any]:
     """
     Run the full exam evaluation pipeline.
     Returns a dict ready to ship to the frontend + drop into Excel.
+
+    PARTIAL-FAILURE SEMANTICS:
+      Per-student errors are caught locally (the student gets an error
+      record, the loop continues). On top-level errors AFTER any
+      students have been graded — splitting failed mid-way, an alignment
+      bug crashed the whole pipeline, Excel export raised, etc. — we
+      STILL return whatever students[] we collected, with `pipelineError`
+      set. Without this, an exam that processed 9 of 10 students cleanly
+      would return 500 and lose all 9; the user has to re-run the entire
+      batch instead of recovering the work that already cost 30 minutes
+      of CPU time.
     """
     exam_id = exam_map.get("examId", "unknown")
     map_pages = exam_map.get("pages", []) or []
@@ -392,51 +404,108 @@ async def evaluate_exam(pdf_bytes: bytes, exam_map: Dict) -> Dict[str, Any]:
 
     print(f"[Pipeline] Exam: {exam_id}, {pages_per_exam} pages/student, {len(question_nums)} questions")
 
-    # 1. PDF → images
-    images = pdf_to_images(pdf_bytes)
-    print(f"[Pipeline] PDF: {len(images)} pages")
-
-    # 2. Split by students (QR or sequential fallback)
-    students = split_by_students(images, exam_map, pages_per_exam)
-    total_students = len(students)
-    print(f"[Pipeline] Students: {total_students}")
-    # Batch boundary — renderer uses sTotal to size the progress bars.
-    print(f"[STAGE] stage=batch state=start sTotal={total_students}")
-    del images
-
-    # 3. Evaluate each student
     all_student_results: List[Dict[str, Any]] = []
-    for i, student in enumerate(students):
+    pipeline_error: Optional[str] = None
+    excel_path: Optional[str] = None
+    total_students = 0
+
+    try:
+        # 1. PDF → images
+        images = pdf_to_images(pdf_bytes)
+        print(f"[Pipeline] PDF: {len(images)} pages")
+
+        # 2. Split by students (QR or sequential fallback)
+        students = split_by_students(images, exam_map, pages_per_exam)
+        total_students = len(students)
+        print(f"[Pipeline] Students: {total_students}")
+        # Batch boundary — renderer uses sTotal to size the progress bars.
+        # `eid` lets the main-side state broker associate the next stream
+        # of stage events with this exam without needing each per-student
+        # event to repeat the id.
+        print(f"[STAGE] stage=batch state=start eid={exam_id} sTotal={total_students}")
+        del images
+
+        # 3. Evaluate each student
+        for i, student in enumerate(students):
+            try:
+                student_data = await evaluate_student(
+                    student, map_pages, i, student_total=total_students,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                student_data = {
+                    "studentNumber": getattr(student, "student_number", f"error_{i + 1}"),
+                    "studentNumberConfidence": 0.0,
+                    "studentNumberImage": "",
+                    "questions": {},
+                    "totalScore": 0,
+                    "totalMaxPoints": 0,
+                    "error": str(e)[:300],
+                }
+                print(f"[STAGE] sIdx={i} sTotal={total_students} stage=error")
+            all_student_results.append(student_data)
+            await asyncio.sleep(0)  # yield between students
+    except Exception as e:
+        # Top-level pipeline crash AFTER some students may already be
+        # graded. Capture the error for the response; fall through to
+        # the export attempt so we still get an xlsx of partial results.
+        traceback.print_exc()
+        pipeline_error = f"Pipeline error: {str(e)[:300]}"
+        print(f"[STAGE] stage=error eid={exam_id} msg={pipeline_error}")
+
+    # 4. Excel export — best-effort. If we have any students at all, write
+    #    what we have. A failure here doesn't lose the in-memory results.
+    if all_student_results:
+        print(f"[STAGE] stage=save state=start")
         try:
-            student_data = await evaluate_student(
-                student, map_pages, i, student_total=total_students,
+            excel_path = export.export_results(
+                exam_id, question_nums, all_student_results, config.OUTPUT_DIR,
             )
+            print(f"[STAGE] stage=save state=end excel={excel_path}")
         except Exception as e:
             traceback.print_exc()
-            student_data = {
-                "studentNumber": getattr(student, "student_number", f"error_{i + 1}"),
-                "studentNumberConfidence": 0.0,
-                "studentNumberImage": "",
-                "questions": {},
-                "totalScore": 0,
-                "totalMaxPoints": 0,
-                "error": str(e)[:300],
+            if pipeline_error is None:
+                pipeline_error = f"Excel export failed: {str(e)[:200]}"
+            print(f"[STAGE] stage=save state=end excel=  error={str(e)[:120]}")
+
+    # 4b. ALWAYS write a JSON sibling to disk — recovers the run if the
+    # renderer was killed/restarted before it could read the HTTP
+    # response. The renderer can fall back to this file via
+    # `evaluate:recover-results` IPC. Cheap insurance: the in-memory
+    # response is already built; serialize once.
+    if all_student_results:
+        try:
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            json_path = os.path.join(config.OUTPUT_DIR, f"{exam_id}_results.json")
+            persist_payload: Dict[str, Any] = {
+                "examId": exam_id,
+                "totalStudents": total_students,
+                "totalQuestions": len(question_nums),
+                "aiEnabled": config.AI_ENABLED,
+                "excelPath": excel_path,
+                "students": all_student_results,
+                "generatedAt": __import__("datetime").datetime.utcnow().isoformat() + "Z",
             }
-            print(f"[STAGE] sIdx={i} sTotal={total_students} stage=error")
-        all_student_results.append(student_data)
-        await asyncio.sleep(0)  # yield between students
+            if pipeline_error is not None:
+                persist_payload["pipelineError"] = pipeline_error
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(persist_payload, f, ensure_ascii=False, indent=2)
+            print(f"[Pipeline] Persisted results JSON: {json_path}")
+        except Exception as e:
+            traceback.print_exc()
+            print(f"[Pipeline] Failed to persist results JSON: {e}")
 
-    # 4. Excel export
-    print(f"[STAGE] stage=save state=start")
-    excel_path = export.export_results(
-        exam_id, question_nums, all_student_results, config.OUTPUT_DIR,
-    )
-    print(f"[STAGE] stage=save state=end excel={excel_path}")
-    print(f"[STAGE] stage=batch state=end sTotal={total_students}")
+    print(f"[STAGE] stage=batch state=end eid={exam_id} sTotal={total_students}")
 
-    print(f"[Pipeline] Done. {total_students} students -> {excel_path}")
+    if pipeline_error is None:
+        print(f"[Pipeline] Done. {total_students} students -> {excel_path}")
+    else:
+        print(
+            f"[Pipeline] Partial: {len(all_student_results)} students saved, "
+            f"error: {pipeline_error}"
+        )
 
-    return {
+    response: Dict[str, Any] = {
         "examId": exam_id,
         "totalStudents": total_students,
         "totalQuestions": len(question_nums),
@@ -444,3 +513,6 @@ async def evaluate_exam(pdf_bytes: bytes, exam_map: Dict) -> Dict[str, Any]:
         "excelPath": excel_path,
         "students": all_student_results,
     }
+    if pipeline_error is not None:
+        response["pipelineError"] = pipeline_error
+    return response
