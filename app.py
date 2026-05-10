@@ -45,6 +45,7 @@ import config
 import ai_evaluation
 import alignment
 import exam_evaluator
+import export as excel_export
 import handwriting
 import pipeline
 from splitting import pdf_to_images
@@ -201,11 +202,74 @@ async def align_only(
 
 @app.get("/results/{exam_id}/excel")
 async def download_excel(exam_id: str):
-    """Serve the generated Excel for a given exam id."""
+    """Serve the generated Excel for a given exam id.
+
+    Retained for backward compatibility. Prefer the on-demand
+    POST /export-excel endpoint below — it regenerates the workbook
+    from the latest student JSON the caller supplies, picking up any
+    teacher overrides made since the original /evaluate run.
+    """
     path = os.path.join(config.OUTPUT_DIR, f"{exam_id}_results.xlsx")
     if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Excel not found. Run /evaluate first.")
+        raise HTTPException(
+            status_code=404,
+            detail="Excel not found. Run /evaluate first or use POST /export-excel.",
+        )
     return FileResponse(path, filename=f"{exam_id}_results.xlsx")
+
+
+class ExportExcelRequest(BaseModel):
+    """Payload for on-demand Excel generation.
+
+    The caller (usually the Electron main process) sends the current
+    student records as the renderer has them, so any teacher overrides
+    or approvals are baked into the output workbook.
+    """
+    exam_id: str
+    students: list[dict]
+    # Optional explicit ordering of question numbers; if omitted we infer
+    # it from the union across all students, sorted numerically.
+    question_nums: Optional[list[str]] = None
+
+
+@app.post("/export-excel")
+async def export_excel_on_demand(req: ExportExcelRequest):
+    """Generate a fresh xlsx from the supplied student JSON and stream it
+    back to the caller. The file is written to OUTPUT_DIR so a subsequent
+    GET /results/<exam_id>/excel still works for legacy callers, but the
+    on-demand POST is the preferred path."""
+    if not req.exam_id:
+        raise HTTPException(status_code=400, detail="exam_id is required")
+    if not req.students:
+        raise HTTPException(status_code=400, detail="students list is empty")
+
+    # Resolve question ordering.
+    if req.question_nums:
+        question_nums = list(req.question_nums)
+    else:
+        q_set: set[str] = set()
+        for s in req.students:
+            qmap = (s or {}).get("questions") or {}
+            for k in qmap.keys():
+                q_set.add(str(k))
+        # Numeric sort where possible
+        def _q_sort_key(k: str):
+            try:
+                return (0, int(k))
+            except (TypeError, ValueError):
+                return (1, k)
+        question_nums = sorted(q_set, key=_q_sort_key)
+
+    try:
+        out_path = excel_export.export_results(
+            req.exam_id, question_nums, req.students,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
+
+    if not os.path.exists(out_path):
+        raise HTTPException(status_code=500, detail="Export produced no file.")
+    return FileResponse(out_path, filename=f"{req.exam_id}_results.xlsx")
 
 
 # Allow only safe basenames: letters, digits, underscore, dot, hyphen + .jpg.
