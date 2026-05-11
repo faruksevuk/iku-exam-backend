@@ -59,6 +59,7 @@ import grading
 import export
 from splitting import StudentExam, pdf_to_images, split_by_students
 
+import base64
 
 # ══════════════════════════════════════════════════════════════════
 #  Question-level evaluation
@@ -152,10 +153,24 @@ async def evaluate_question(
     if q_type == "open_ended":
         solution_box = q_data.get("solutionArea")
         student_answer_crop = None
+        base64_img_string = None
+
         if solution_box:
             raw = preprocessing.crop_raw(aligned, solution_box)
             result["solutionAreaImage"] = preprocessing.encode_jpeg_b64(raw)
             student_answer_crop = preprocessing.crop_for_reading(aligned, solution_box, pad=12)
+            
+            h, w = student_answer_crop.shape[:2]
+            max_dim = 800
+            if w > max_dim or h > max_dim:
+                scale = max_dim / max(w, h)
+                ai_crop = cv2.resize(student_answer_crop, (0,0), fx=scale, fy=scale)
+            else:
+                ai_crop = student_answer_crop
+
+            success, encoded_image = cv2.imencode('.jpg', ai_crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if success:
+                base64_img_string = base64.b64encode(encoded_image).decode('utf-8')
 
         if expected.get("text"):
             result["expectedText"] = expected["text"]
@@ -166,7 +181,7 @@ async def evaluate_question(
                 question_text=q_data.get("questionText", f"Question {q_num}"),
                 rubric_text=expected.get("text", ""),
                 max_points=float(scoring.get("points", 0) or 0),
-                reference_image=None,  # TODO: decode expected.images[0] when AI_ENABLED
+                base64_image=base64_img_string # <--- PASS THE IMAGE HERE
             )
             score_res = grading.score_open(scoring, ai_res)
         else:
@@ -181,18 +196,6 @@ async def evaluate_question(
 
         result.update(score_res)
         return result
-
-    # ── Unknown ──
-    result.update({
-        "score": 0.0,
-        "maxPoints": float(scoring.get("points", 0) or 0),
-        "status": "error",
-        "confidence": 0.0,
-        "explanation": f"Unknown question type: {q_type}",
-        "needsReview": True,
-    })
-    return result
-
 
 async def evaluate_student_page(
     aligned: np.ndarray,

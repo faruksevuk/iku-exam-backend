@@ -158,9 +158,10 @@ FUZZY_USE_TOKEN_SORT = True
 # ── AI evaluation (open-ended) ─────────────────────────────────────
 AI_ENABLED = True             # AI grading via Ollama. Set to False to fall back to placeholder/manual review.
 OLLAMA_URL = "http://localhost:11434"
-VISION_MODEL = None           # Reserved for a future vision-LLM hook. This round uses handwriting.py for OCR.
+VISION_MODEL = "qwen2.5vl:3b"  # The model for visual reading
+#VISION_MODEL = None           # Reserved for a future vision-LLM hook. This round uses handwriting.py for OCR.
 GRADING_MODEL = "qwen3:1.7b"
-AI_TIMEOUT_SECONDS = 90
+AI_TIMEOUT_SECONDS = 1200
 # Phrases that, if echoed in AI explanation, force manual review:
 AI_SAFETY_FLAGS = [
     "ignore previous",

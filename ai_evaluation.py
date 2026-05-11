@@ -56,6 +56,7 @@ async def evaluate_open_ended(
     question_text: str,
     rubric_text: str,
     max_points: float,
+    base64_image: str = None,
     reference_image=None,  # np.ndarray or None
 ) -> Dict[str, Any]:
     """
@@ -87,14 +88,14 @@ async def evaluate_open_ended(
             "readerConfidence": reader_result.confidence,
         }
 
-    # AI mode — not implemented yet; falls through to fallback
+    # AI mode
     try:
         result = await _grade_with_llm(
             question_text=question_text,
             rubric_text=rubric_text,
             max_points=max_points,
             student_text=student_text,
-            # TODO: pass question_image, reference_image when VLM path is added
+            base64_image=base64_image #VLM integration
         )
         # Safety guard — any flagged phrase forces review
         expl = (result.get("explanation") or "").lower()
@@ -103,8 +104,9 @@ async def evaluate_open_ended(
             result["status"] = "ai_flagged"
         if result.get("confidence", 0.0) < config.HIGH_CONF_THRESHOLD:
             result["needsReview"] = True
-        result["studentReadText"] = student_text
+        result["studentReadText"] = result.get("vision_transcription", student_text) 
         return result
+
     except Exception as e:
         return _fallback_result(student_text, reader_result.confidence, error=str(e)[:200])
 
@@ -132,13 +134,15 @@ async def _grade_with_llm(
     rubric_text: str,
     max_points: float,
     student_text: str,
+    base64_image: str = None,
 ) -> Dict[str, Any]:
     result = await asyncio.to_thread(
         exam_evaluator.grade_open_ended_answer,
         question=question_text,
         answer_key=rubric_text,
         student_answer=student_text,
-        max_points=max_points
+        max_points=max_points,
+        base64_image=base64_image
     )
 
     if result.get("status") == "error":
@@ -158,7 +162,8 @@ async def _grade_with_llm(
         "confidence": confidence,
         "status": "ai_graded",
         "explanation": result.get("justification", ""),
-        "needsReview": needs_review
+        "needsReview": needs_review,
+        "vision_transcription": result.get("transcription", student_text) 
     }
 
 
