@@ -19,6 +19,9 @@ needs_review, fallback_used).
 """
 
 import os
+import json
+import base64
+import urllib.request
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -299,6 +302,63 @@ def _classify_letter(
     return (best_letter, round(best_conf, 4))
 
 
+def _read_vlm_digit_strip(strip_image: np.ndarray, expected_length: int) -> Tuple[str, float]:
+    """
+    Qwen2.5VL ile ogrenci numarasi seridini oku.
+    CNN ve TrOCR anlasmazliklarinda tiebreaker olarak kullanilir.
+    Sadece 4/6/7/9 karismalari icin cagrilir (~2-3s ekstra).
+    """
+    if strip_image is None or strip_image.size == 0:
+        return ("", 0.0)
+    try:
+        ok, buf = cv2.imencode(".jpg", strip_image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not ok:
+            return ("", 0.0)
+        b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+
+        payload = {
+            "model": config.VISION_MODEL,
+            "keep_alive": -1,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a strict OCR machine. Output ONLY the digits visible in the image. "
+                        "No words, no spaces, no punctuation, no explanation."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Bu goruntude {expected_length} haneli bir ogrenci numarasi var. "
+                        f"SADECE rakamlari soldan saga yaz. Tam {expected_length} rakam dondur."
+                    ),
+                    "images": [b64],
+                },
+            ],
+            "stream": False,
+            "options": {"temperature": 0.0, "num_predict": 32, "num_ctx": 1024},
+        }
+        url = f"{config.OLLAMA_URL.rstrip('/')}/api/chat"
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode("utf-8")
+            envelope = json.loads(body)
+            raw = envelope["message"]["content"].strip()
+        digits = "".join(c for c in raw if c.isdigit())
+        if len(digits) == expected_length:
+            return (digits, 0.92)
+        # Yanlis uzunluk dondurdu — guvenilmez ama yine de dondur (caller karar verir)
+        return (digits, 0.40)
+    except Exception as e:
+        if config.VERBOSE:
+            print(f"[Handwriting] SN VLM tiebreaker failed: {e}")
+        return ("", 0.0)
+
+
 def read_student_number(
     aligned_image: np.ndarray,
     digit_boxes: List[dict],
@@ -338,7 +398,7 @@ def read_student_number(
     # an otherwise 0.99 sequence) still fires the cross-check so we never
     # silently accept a low-confidence digit just because the average is
     # high. Reading quality is preserved exactly for any uncertain student.
-    SN_TROCR_SKIP_MIN_CONF = 0.97
+    SN_TROCR_SKIP_MIN_CONF = 1.01   # her zaman TrOCR ile capraz oku (4/6/7/9 karismalari icin)
     skip_trocr = (
         bool(cnn_confs)
         and "?" not in cnn_digits
@@ -371,24 +431,87 @@ def read_student_number(
     disagreements = 0
     overrides = 0
     used_trocr = False
+    used_vlm = False
+    vlm_text = ""
+    vlm_conf = 0.0
+    CONFUSABLE = {"4", "6", "7", "9"}
+
     if trocr_text and len(trocr_text) == len(cnn_digits):
         used_trocr = True
+
+        # CNN okumasinda HERHANGI bir 4/6/7/9 varsa VLM'i cagir.
+        # Sebep: CNN (MNIST) ve TrOCR (IAM) ikisi de Bati el yazisi verisiyle
+        # egitilmis, ayni yanlislari yapma egiliminde. Bu rakamlarda
+        # "CNN+TrOCR aynisini sorunca" demek YANLIS olunca da aynisini soyluyor
+        # demek — VLM bagimsiz ucuncu okuyucu olarak gerekli.
+        needs_vlm = any(d in CONFUSABLE for d in cnn_digits) or any(
+            d in CONFUSABLE for d in trocr_text
+        )
+        if needs_vlm and digit_boxes and aligned_image.size > 0:
+            try:
+                pad = 4
+                min_x = max(0, int(min(b["x"] for b in digit_boxes)) - pad)
+                min_y = max(0, int(min(b["y"] for b in digit_boxes)) - pad)
+                max_x = min(aligned_image.shape[1],
+                            int(max(b["x"] + b["w"] for b in digit_boxes)) + pad)
+                max_y = min(aligned_image.shape[0],
+                            int(max(b["y"] + b["h"] for b in digit_boxes)) + pad)
+                if max_x > min_x and max_y > min_y:
+                    strip = aligned_image[min_y:max_y, min_x:max_x]
+                    vlm_text, vlm_conf = _read_vlm_digit_strip(strip, len(cnn_digits))
+                    if vlm_text and len(vlm_text) == len(cnn_digits):
+                        used_vlm = True
+                        if config.VERBOSE:
+                            print(f"[Handwriting] SN VLM tiebreaker: cnn={cnn_number} trocr={trocr_text} vlm={vlm_text}")
+            except Exception as e:
+                if config.VERBOSE:
+                    print(f"[Handwriting] SN VLM cross-check failed: {e}")
+
         for i, (cd, td) in enumerate(zip(cnn_digits, trocr_text)):
+            vd = vlm_text[i] if (used_vlm and i < len(vlm_text)) else None
+
             if cd == td:
-                agreements += 1
-                # Boost confidence — two independent readers agree
-                final_confs[i] = min(1.0, max(cnn_confs[i], trocr_conf) * 1.05)
+                # CNN ve TrOCR ayni cevabi veriyor.
+                if used_vlm and vd is not None and vd != cd and vd.isdigit() and cd in CONFUSABLE:
+                    # KRITIK: 4/6/7/9 ciftinde CNN+TrOCR ayni demis ama VLM
+                    # baska bir rakam soyluyor. CNN ve TrOCR ikisi de Bati
+                    # verisiyle egitilmis ve bu rakamlarda ayni yonde yaniliyor.
+                    # VLM bagimsiz okuyucu — onunla git.
+                    final_digits[i] = vd
+                    final_confs[i] = vlm_conf
+                    overrides += 1
+                    disagreements += 1
+                else:
+                    agreements += 1
+                    final_confs[i] = min(1.0, max(cnn_confs[i], trocr_conf) * 1.05)
             else:
                 disagreements += 1
-                # Disagreement: take the higher-confidence reader for this position.
-                # CNN is a per-digit specialist, so we tilt toward it unless its
-                # confidence is clearly lower than TrOCR's overall sequence conf.
-                if cd == "?" or cnn_confs[i] < trocr_conf - 0.05:
+                # Disagreement: VLM cagrildiysa VLM'in oyu belirleyici.
+                # VLM cagrilmadiysa eski mantik (TrOCR'ye guven konfuze ciftlerde).
+                if used_vlm and vd is not None and vd.isdigit():
+                    if vd == cd:
+                        # VLM CNN ile ayni → CNN'i tut
+                        final_digits[i] = cd
+                        final_confs[i] = max(cnn_confs[i], vlm_conf)
+                    elif vd == td:
+                        # VLM TrOCR ile ayni → TrOCR'yi al
+                        final_digits[i] = td
+                        final_confs[i] = max(trocr_conf, vlm_conf)
+                        overrides += 1
+                    else:
+                        # VLM 3. bir cevap soyluyor → VLM'i al
+                        final_digits[i] = vd
+                        final_confs[i] = vlm_conf
+                        overrides += 1
+                elif (
+                    cd == "?"
+                    or cnn_confs[i] < trocr_conf - 0.05
+                    or (cd in CONFUSABLE and td in CONFUSABLE)
+                ):
                     final_digits[i] = td
                     final_confs[i] = trocr_conf
                     overrides += 1
                 else:
-                    # Keep CNN but penalize — one reader thinks it's wrong
                     final_confs[i] = cnn_confs[i] * 0.85
 
     final_number = "".join(final_digits)
@@ -399,7 +522,9 @@ def read_student_number(
         or (used_trocr and disagreements > 1)
     )
 
-    if used_trocr and overrides > 0:
+    if used_vlm:
+        source = "digit_cnn+trocr+vlm"
+    elif used_trocr and overrides > 0:
         source = "digit_cnn+trocr"
     elif used_trocr:
         source = "digit_cnn(trocr_confirmed)"
@@ -417,6 +542,9 @@ def read_student_number(
             "cnn_per_digit": [round(c, 4) for c in cnn_confs],
             "trocr_text": trocr_text,
             "trocr_conf": round(trocr_conf, 4),
+            "vlm_text": vlm_text,
+            "vlm_conf": round(vlm_conf, 4),
+            "used_vlm": used_vlm,
             "agreements": agreements,
             "disagreements": disagreements,
             "overrides": overrides,

@@ -13,3 +13,7 @@ debug_*.py
 samples/blanks/
 samples/mock/
 samples/mock-students/
+
+# SQLite shadow storage — recreated on demand by database.init_db()
+*.db
+*.db-journal

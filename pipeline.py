@@ -60,6 +60,7 @@ import export
 from splitting import StudentExam, pdf_to_images, split_by_students
 
 import base64
+import db_service
 
 # ══════════════════════════════════════════════════════════════════
 #  Question-level evaluation
@@ -494,6 +495,20 @@ async def evaluate_exam(pdf_bytes: bytes, exam_map: Dict) -> Dict[str, Any]:
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(persist_payload, f, ensure_ascii=False, indent=2)
             print(f"[Pipeline] Persisted results JSON: {json_path}")
+
+            # Mirror the run into SQLite. BEST-EFFORT — if the DB write
+            # raises (locked file, schema mismatch, etc.) we keep the
+            # JSON sibling on disk and the in-memory response intact.
+            # The renderer never depends on the DB row existing.
+            try:
+                db_info = db_service.save_evaluation_result(
+                    exam_map=exam_map,
+                    result_payload=persist_payload,
+                )
+                print(f"[DB] Persisted evaluation: {db_info}")
+            except Exception as db_err:
+                traceback.print_exc()
+                print(f"[DB] Failed to persist evaluation: {db_err}")
         except Exception as e:
             traceback.print_exc()
             print(f"[Pipeline] Failed to persist results JSON: {e}")

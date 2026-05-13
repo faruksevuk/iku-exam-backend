@@ -48,9 +48,22 @@ import exam_evaluator
 import export as excel_export
 import handwriting
 import pipeline
+import db_service
+from database import DATABASE_PATH, init_db
 from splitting import pdf_to_images
 
 app = FastAPI(title="IKU Exam Evaluator", version="0.5.0")
+
+# Initialize SQLite schema at import time. The DB is shadow storage —
+# JSON files under OUTPUT_DIR remain the source of truth for the
+# renderer — so a failure here logs and continues rather than killing
+# the server. Without this, a corrupt or locked exam_demo.db file
+# would block /evaluate too even though it doesn't depend on the DB.
+try:
+    init_db()
+    print(f"[DB] SQLite ready: {DATABASE_PATH}")
+except Exception as _db_err:
+    print(f"[DB] init_db failed (continuing without DB): {_db_err}")
 
 
 # ── Request models ────────────────────────────────────────────────
@@ -88,6 +101,20 @@ class InsightsRequest(BaseModel):
     totalStudents: int
     belowPassing: int                   # count of students under 50%
     hardestQuestions: list[HardestQuestion] = []
+
+
+class TeacherOverrideRequest(BaseModel):
+    """Payload for POST /db/question-results/{id}/override."""
+    new_score: float
+    reason: Optional[str] = "Teacher override from demo"
+    teacher: Optional[str] = "teacher"
+
+
+class FinalApprovalRequest(BaseModel):
+    """Payload for POST /db/exam-results/{id}/approve."""
+    status: str = "approved"
+    final_score: Optional[float] = None
+    approved_by: Optional[str] = "teacher"
 
 
 os.makedirs(config.OUTPUT_DIR, exist_ok=True)
@@ -507,6 +534,74 @@ async def ocr_open_ended_endpoint(req: OcrOpenEndedRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"OCR error: {str(e)[:300]}")
+
+
+# ── Database endpoints ────────────────────────────────────────────
+# Additive layer alongside the JSON storage. The pipeline writes JSON
+# (source of truth) AND mirrors into SQLite (queryable history). These
+# endpoints let the UI or external tools inspect saved runs, apply
+# teacher overrides with an audit trail, and finalize approvals.
+
+@app.get("/db/health")
+def db_health_endpoint():
+    """Per-table row counts + SQLite path. Safe to call before any /evaluate run."""
+    return db_service.db_health()
+
+
+@app.get("/db/demo/seed")
+@app.post("/db/demo/seed")
+def db_seed_demo_endpoint():
+    """Populate DEMO_EXAM_001 without running the PDF pipeline. Idempotent."""
+    return db_service.seed_demo_data()
+
+
+@app.get("/db/exams")
+def db_list_exams_endpoint():
+    """All saved exam runs, newest first."""
+    return db_service.list_exams()
+
+
+@app.get("/db/exams/{exam_id}/results")
+def db_exam_results_endpoint(exam_id: str):
+    """Full result tree for one exam — students × questions × OCR/LLM rows."""
+    result = db_service.get_exam_results(exam_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    return result
+
+
+@app.post("/db/question-results/{question_result_id}/override")
+def db_teacher_override_endpoint(
+    question_result_id: int,
+    req: TeacherOverrideRequest,
+):
+    """Overwrite a question's score and audit-log the change."""
+    result = db_service.apply_teacher_override(
+        question_result_id=question_result_id,
+        new_score=req.new_score,
+        reason=req.reason or "Teacher override",
+        teacher=req.teacher or "teacher",
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Question result not found")
+    return result
+
+
+@app.post("/db/exam-results/{exam_result_id}/approve")
+def db_final_approval_endpoint(
+    exam_result_id: int,
+    req: FinalApprovalRequest,
+):
+    """Mark an ExamResult as final-approved with an audit-trail entry."""
+    result = db_service.approve_exam_result(
+        exam_result_id=exam_result_id,
+        status=req.status,
+        final_score=req.final_score,
+        approved_by=req.approved_by or "teacher",
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Exam result not found")
+    return result
 
 
 # ── Local run ─────────────────────────────────────────────────────
