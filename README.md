@@ -5,21 +5,51 @@ exam's coordinate map, and returns per-student, per-question grades.
 Designed to run on-premise on a single CPU machine — no GPU, no cloud
 calls, no internet at runtime beyond a local Ollama daemon.
 
-Paired with the [iku-exam-generator](https://github.com/faruksevuk/iku-exam-generator)
-Electron desktop app, which spawns this backend as a managed child
-process. The backend can also be hit directly via HTTP for testing.
+---
+
+## ⚠ This project lives in two repositories
+
+You almost certainly want both. This repo is just the engine.
+
+| Repo | What it is | What you do with it |
+|---|---|---|
+| **iku-exam-backend** (this repo) | The Python FastAPI service that does OCR + AI grading | Install once with `pip install -r requirements.txt`. **The desktop app starts this for you** — you typically do not run it by hand. |
+| **[iku-exam-generator](https://github.com/faruksevuk/iku-exam-generator)** | The Electron desktop app — the GUI teachers actually use | Authors exams, ingests scans, shows the review workspace. Start there if you are new. |
+
+If you are just trying to get the application running for the first
+time, **go to the [generator repo's README](https://github.com/faruksevuk/iku-exam-generator#readme)
+first** — its step-by-step setup walks through both repositories in
+the right order.
+
+This README documents the backend in detail for developers who want
+to test it standalone, debug it, or extend it.
 
 ---
 
-## Quick start
+## What this service does (in one paragraph)
+
+Receives a scanned multi-student exam PDF + a `map.json` describing
+where every question lives on the page. Splits per student via QR or
+sequential fallback, aligns each page to the canonical layout using
+corner anchors, then dispatches each question to the right reader:
+classical bubble OMR for multiple-choice and multi-select; a
+LetterCNN + Tesseract cascade for matching cells; a TrOCR + Tesseract
+cascade for fill-in-blanks; a Qwen2.5-VL 3B vision model for
+open-ended transcription that feeds into a Qwen3 1.7B rubric grader.
+Returns a per-student, per-question result tree as JSON, also writes
+it to disk as a recovery file, and mirrors it into a local SQLite
+shadow store for queryable history.
+
+---
+
+## Standalone quick start (developers only)
+
+If you have a venv set up and just want the backend running:
 
 ```bash
-git clone https://github.com/faruksevuk/iku-exam-backend.git exam-backend
-cd exam-backend
-python -m venv venv
-venv\Scripts\activate           # Windows
-# source venv/bin/activate      # macOS / Linux
-pip install -r requirements.txt
+cd iku-exam-backend
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 python -m uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
@@ -28,6 +58,87 @@ Visit `http://127.0.0.1:8000/health` to confirm it's up.
 The Electron app picks a random free port at spawn time and passes
 `PORT` via env, so when running through the app you don't fix the port
 here yourself.
+
+---
+
+## First-time setup (if you are on a fresh machine)
+
+These steps assume nothing is installed. If you just want the desktop
+app working, the **[generator repo's README](https://github.com/faruksevuk/iku-exam-generator#readme)
+is the better starting point** — it covers both repos in one
+walk-through. The steps below cover the backend half only.
+
+### Prerequisites
+
+| Tool | Purpose | Where to get it |
+|---|---|---|
+| **Python 3.11+** | runs this backend | <https://www.python.org/downloads/> — tick "Add Python to PATH" |
+| **Git** | clones this repo | <https://git-scm.com/downloads> |
+| **Tesseract OCR** | one of the OCR readers | Windows: `winget install UB-Mannheim.TesseractOCR` / macOS: `brew install tesseract` / Debian: `sudo apt install tesseract-ocr` |
+| **Ollama** | serves the two local language models | <https://ollama.com/download> — installs as a background service |
+
+Hardware: AVX2-capable CPU, **8 GB RAM minimum** (16 GB recommended),
+**~6 GB free disk** for model weights. NVIDIA GPU is optional; Ollama
+will use it for offload if present.
+
+### Step 1 — Clone and install Python deps
+
+```bash
+git clone https://github.com/faruksevuk/iku-exam-backend.git
+cd iku-exam-backend
+python -m venv .venv
+
+# Activate the venv:
+.venv\Scripts\activate           # Windows
+# source .venv/bin/activate      # macOS / Linux
+
+pip install -r requirements.txt
+```
+
+This pulls FastAPI, PyTorch (CPU), TrOCR / Transformers, SQLAlchemy,
+PyMuPDF and friends — ~2 GB on disk, 5–10 minutes on a fresh install.
+
+### Step 2 — Pull the two AI models via Ollama
+
+```bash
+ollama pull qwen3:1.7b        # ~1.1 GB — the rubric grader
+ollama pull qwen2.5vl:3b      # ~3 GB — the vision model for handwriting
+```
+
+If you skip the vision model, open-ended grading will still work but
+falls back to TrOCR-only transcription and is noticeably less
+accurate.
+
+### Step 3 — First launch
+
+```bash
+python -m uvicorn app:app --host 127.0.0.1 --port 8000
+```
+
+Expect 50–60 seconds of model warm-up the first time, then:
+
+```
+[DB] SQLite ready: …/exam_demo.db
+[Startup] All readers warm
+INFO: Uvicorn running on http://127.0.0.1:8000
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Should return:
+
+```json
+{"status":"ok","version":"0.5.0","ai_enabled":true,
+ "provider":"ollama","vision_model":"qwen2.5vl:3b",
+ "grading_model":"qwen3:1.7b"}
+```
+
+If `ai_enabled` is `false` or either model field is missing, Ollama
+isn't reachable or the models aren't pulled.
 
 ---
 
@@ -44,10 +155,16 @@ brew install tesseract                       # macOS
 sudo apt install tesseract-ocr               # Debian / Ubuntu
 ```
 
-### Ollama (for open-ended grading)
+### Ollama (for open-ended grading + handwriting transcription)
 
-The open-ended grader (`POST /grade-open-ended`) talks to a local
-[Ollama](https://ollama.com) daemon at `http://127.0.0.1:11434/api/chat`.
+Open-ended questions go through two local models served by
+[Ollama](https://ollama.com) at `http://127.0.0.1:11434`:
+
+1. **Qwen2.5-VL 3B** — vision-language model that transcribes the
+   handwritten student answer directly from the page crop.
+2. **Qwen3 1.7B** — rubric grader that scores the transcription
+   against the answer key.
+
 No `llama-cpp-python` required — we call Ollama from stdlib
 `urllib.request`.
 
@@ -55,12 +172,23 @@ No `llama-cpp-python` required — we call Ollama from stdlib
 winget install Ollama.Ollama                 # Windows (runs as background service)
 brew install ollama && ollama serve &        # macOS
 
-ollama pull qwen3:1.7b
+ollama pull qwen3:1.7b       # ~1.1 GB
+ollama pull qwen2.5vl:3b     # ~3 GB
 ```
 
-The grading model and URL live in `config.py` as `GRADING_MODEL` and
-`OLLAMA_URL`. To disable AI grading entirely (placeholder mode — every
-open-ended answer is flagged for manual review), set `AI_ENABLED = False`.
+The grading model, vision model, and Ollama URL live in `config.py`
+as `GRADING_MODEL`, `VISION_MODEL`, and `OLLAMA_URL`. To disable AI
+grading entirely (placeholder mode — every open-ended answer is
+flagged for manual review), set `AI_ENABLED = False`.
+
+### SQLite database (zero setup)
+
+Every saved run is mirrored into a local SQLite file
+(`exam_demo.db`, next to `app.py`) via SQLAlchemy. The schema is
+created automatically on first run by `database.init_db()` — you do
+not need to install a database server. The JSON results file on disk
+remains the source of truth for the desktop app; the database is
+queryable shadow storage for the audit trail.
 
 ### Hardware
 
@@ -127,6 +255,12 @@ run — recoverable even if the calling renderer is killed mid-evaluation.
 | GET  | `/results/{exam_id}/excel` | Download generated xlsx (legacy) |
 | POST | `/export-excel` | Generate xlsx on demand from supplied JSON. Kept for back-compat — the desktop app now does xlsx generation locally with `exceljs` to remove the backend hop. |
 | GET  | `/aligned-page/{filename}` | Per-student aligned-page JPEG (used by the review workspace). Path-traversal validated. |
+| GET  | `/db/health` | SQLite row counts per table. Use it to confirm the DB layer is alive. |
+| GET  | `/db/exams` | List every saved exam run, newest first. |
+| GET  | `/db/exams/{exam_id}/results` | Full result tree (students × questions × OCR/LLM rows) from the DB. |
+| POST | `/db/question-results/{id}/override` | Apply a teacher override; auto-recomputes exam total and writes an audit log entry. |
+| POST | `/db/exam-results/{id}/approve` | Final-approve a student's exam result; writes an audit log entry. |
+| GET / POST | `/db/demo/seed` | Insert a small `DEMO_EXAM_001` dataset for tests without running the PDF pipeline. |
 
 See `app.py` docstrings for request / response shapes.
 
@@ -142,7 +276,8 @@ See `app.py` docstrings for request / response shapes.
 | `TESSERACT_CMD` | Absolute path to the Tesseract binary |
 | `AI_ENABLED` | False → open-ended answers return placeholder verdicts |
 | `OLLAMA_URL` | LLM endpoint (default `http://127.0.0.1:11434`) |
-| `GRADING_MODEL` | Ollama model tag for open-ended grading |
+| `GRADING_MODEL` | Ollama model tag for open-ended grading (`qwen3:1.7b`) |
+| `VISION_MODEL` | Ollama model tag for handwriting transcription (`qwen2.5vl:3b`) |
 | `LLM_TIMEOUT_S` | Per-call timeout (90 s default) |
 
 ---
