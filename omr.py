@@ -81,6 +81,24 @@ def evaluate_mc(
             "explanation": "No answer marked.",
         }
 
+    # Double-mark detection: more than one option above the filled threshold
+    # invalidates a single-answer MC question. Hand it to the teacher with a
+    # zero-but-reviewable verdict (grading.score_mc treats selected=None as 0).
+    filled_options = [k for k, v in ratios.items() if v >= config.OMR_FILLED_THRESHOLD]
+    if len(filled_options) > 1:
+        return {
+            "selected": None,
+            "isBlank": False,
+            "isCorrect": False,
+            "confidence": 0.30,
+            "fillRatios": ratios,
+            "explanation": (
+                f"Multiple marks detected [{', '.join(sorted(filled_options))}]. "
+                f"Invalid for MC."
+            ),
+            "needsReview": True,
+        }
+
     # Ambiguous: something dark, but not above filled threshold
     if max_ratio < config.OMR_FILLED_THRESHOLD:
         return {

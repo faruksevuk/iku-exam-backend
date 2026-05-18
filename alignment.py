@@ -340,6 +340,31 @@ def _anchor_center(anchor: Dict) -> Tuple[float, float]:
     return (0.0, 0.0)
 
 
+def _fix_orientation(image: np.ndarray) -> np.ndarray:
+    """
+    Detect if the page was scanned upside-down by looking at the QR code's
+    position on the page. The QR is printed in the TOP-LEFT corner; if a
+    QR is found in the bottom half of the scanned image, the page was fed
+    into the scanner the wrong way around and we rotate it 180°.
+
+    detect() is used instead of detectAndDecode() because we only need the
+    location, not the contents — that's ~3-5x faster.
+    """
+    detector = cv2.QRCodeDetector()
+    retval, points = detector.detect(image)
+
+    if retval and points is not None and len(points) > 0:
+        pts = points[0]
+        cy = float(np.mean(pts[:, 1]))
+        img_h = image.shape[0]
+        if cy > (img_h / 2):
+            if getattr(config, "VERBOSE", False):
+                print("[Alignment] Upside-down scan detected (QR in bottom half). Rotating 180°.")
+            return cv2.rotate(image, cv2.ROTATE_180)
+
+    return image
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Transform computation
 # ══════════════════════════════════════════════════════════════════
@@ -368,6 +393,10 @@ def align_page(
     """
     pw = config.PAGE_WIDTH_PX if page_width is None else page_width
     ph = config.PAGE_HEIGHT_PX if page_height is None else page_height
+
+    # Step 1: orientation fix — rotate 180° if the scan was fed upside-down
+    # (detected via QR code position).
+    image = _fix_orientation(image)
 
     img_h, img_w = image.shape[:2]
     if config.VERBOSE:
